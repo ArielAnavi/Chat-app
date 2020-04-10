@@ -1,41 +1,86 @@
-var createError = require('http-errors');
-var express = require('express');
-var path = require('path');
-var cookieParser = require('cookie-parser');
-var logger = require('morgan');
+const path = require('path');
+const express = require('express');
+const dotenv = require('dotenv');
+const morgan = require('morgan');
+const colors = require('colors');
+const fileupload = require('express-fileupload');
+const cookiesParser = require('cookie-parser');
+const mongoSanitize = require('express-mongo-sanitize');
+const helmet = require('helmet');
+const xss = require('xss-clean');
+const rateLimit = require('express-rate-limit');
+const hpp = require('hpp');
+const cors = require('cors');
+const errorHandler = require('./middleware/error');
+const fs = require('fs');
+const http = require('http');
+//const connectDB = require('./config/db');
 
-var indexRouter = require('./routes/index');
-var usersRouter = require('./routes/users');
+// Load env development vars
+if (process.env.NODE_ENV !== 'production') {
+  dotenv.config({path: './config/config.env'});
+}
+// Connect to database
+//connectDB();
 
-var server = express();
+// Route file
+const user = require('./routes/user');
+const auth = require('./routes/auth');
 
-// view engine setup
-server.set('views', path.join(__dirname, 'views'));
-server.set('view engine', 'pug');
+const app = express();
 
-server.use(logger('dev'));
-server.use(express.json());
-server.use(express.urlencoded({ extended: false }));
-server.use(cookieParser());
-server.use(express.static(path.join(__dirname, 'public')));
+// Body parser
+app.use(express.json());
 
-server.use('/', indexRouter);
-server.use('/users', usersRouter);
+// Cookie parser
+app.use(cookiesParser());
 
-// catch 404 and forward to error handler
-server.use(function(req, res, next) {
-  next(createError(404));
+// Dev logging middleware
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
+}
+
+// File uploading
+app.use(fileupload());
+
+// Sanitize data
+app.use(mongoSanitize());
+
+// Set security headers
+app.use(helmet());
+
+// Prevent XSS attacks
+app.use(xss());
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 mins
+  max: 100
 });
+app.use(limiter);
 
-// error handler
-server.use(function(err, req, res, next) {
-  // set locals, only providing error in development
-  res.locals.message = err.message;
-  res.locals.error = req.app.get('env') === 'development' ? err : {};
+// Prevent http param pollution
+app.use(hpp());
 
-  // render the error page
-  res.status(err.status || 500);
-  res.render('error');
+// Enable CORS
+app.use(cors());
+
+// Set static folder
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Mount routers
+app.use('/api/v1/user', user);
+app.use('/api/v1/auth', auth);
+
+app.use(errorHandler);
+
+const PORT = process.env.PORT || 4000;
+
+const server = app.listen(PORT, console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`.yellow.bold));
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err, promise) => {
+  console.log(`Error: ${err.message}`.red);
+  //Close server & exit process
+  server.close(() => process.exit(1));
 });
-
-module.exports = server;
